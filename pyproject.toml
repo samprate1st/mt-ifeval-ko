@@ -1,0 +1,38 @@
+[project]
+name = "mt-ifeval-ko"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "absl-py>=2.3.1",
+    "accelerate>=1.9.0",
+    "anthropic>=0.57.1",
+    "datasets>=4.0.0",
+    "emoji>=2.14.1",
+    "google-generativeai>=0.8.5",
+    "gradio>=5.38.0",
+    "immutabledict>=4.2.1",
+    "ja-sentence-segmenter>=0.0.2",
+    "janome>=0.5.0",
+    "langchain>=0.3.26",
+    "langchain-anthropic>=0.3.17",
+    "langchain-community>=0.3.27",
+    "langchain-core>=0.3.69",
+    "langchain-google-genai>=2.0.10",
+    "langchain-ollama>=0.3.5",
+    "langchain-openai>=0.3.28",
+    "langdetect>=1.0.9",
+    "langfuse>=3.2.1",
+    "markdown>=3.8.2",
+    "mistralai>=1.9.2",
+    "nltk>=3.9.1",
+    "openai>=1.97.0",
+    "pandas>=2.3.1",
+    "pysondb>=1.6.7",
+    "pythainlp>=5.1.2",
+    "scipy>=1.16.0",
+    "six>=1.17.0",
+    "spacy>=3.8.7",
+    "transformers>=4.53.2",
+]
