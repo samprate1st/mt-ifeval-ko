@@ -1,7 +1,9 @@
-# Multi-Turn-IFEval LangChain
+# MT-IFEval-Ko
 
 Multi-turn Instruction Following 평가를 위한 도구입니다. 
 Langfuse와 LangChain을 활용하여 평가결과를 모니터링 합니다.
+본 과제는 한국어 데이터셋을 개발하기 편리한 환경 구축을 목적으로 합니다.
+개발된 한국어 데이터셋은 추후 공개 예정입니다.
 
 ## 주요 기능
 
