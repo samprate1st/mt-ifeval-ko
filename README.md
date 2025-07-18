@@ -1,12 +1,12 @@
-# Multi-IFEval LangChain
+# Multi-Turn-IFEval LangChain
 
-멀티턴 Instruction Following 평가를 위한 도구입니다. 
-Langfuse와 LangChain을 활용하여 LLM의 멀티턴 지시 따르기 능력을 평가합니다.
+Multi-turn Instruction Following 평가를 위한 도구입니다. 
+Langfuse와 LangChain을 활용하여 평가결과를 모니터링 합니다.
 
 ## 주요 기능
 
 1. Langfuse 서버에서 데이터셋 다운로드
-2. LangChain을 사용하여 멀티턴 대화 생성
+2. LangChain/LangGraph 기반 멀티턴 대화 생성
 3. IFEval을 사용하여 strict/loose 평가 수행
 4. 평가 결과를 Langfuse 서버에 기록
 
@@ -14,8 +14,8 @@ Langfuse와 LangChain을 활용하여 LLM의 멀티턴 지시 따르기 능력�
 
 1. 저장소 클론
 ```bash
-git clone https://github.com/yourusername/multi-ifeval-langchain.git
-cd multi-ifeval-langchain
+git clone https://github.com/samprat1st/mt-ifeval-ko.git
+cd mt-ifeval-ko
 ```
 
 2. 가상 환경 생성 및 활성화
@@ -101,6 +101,8 @@ python app.py
 ```bash
 ./upload_dataset.sh
 ```
+현재는 영어 데이터셋 (by Meta)만 공유되어 있습니다.
+한글 버전은 작업 중입니다.
 
 ## 라이선스
 
