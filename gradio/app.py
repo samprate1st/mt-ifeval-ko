@@ -80,8 +80,7 @@ class GradioEvaluationApp:
             "gpt-4o-mini", 
             "gpt-4.1",
             "gpt-4.1-mini",
-            "gpt-4.1-nano",
-            "gpt-3.5-turbo"
+            "gpt-4.1-nano"
         ]
         
         # Langfuse 클라이언트 초기화
@@ -127,7 +126,7 @@ class GradioEvaluationApp:
         except Exception as e:
             print(f"❌ 데이터셋 리스트 가져오기 실패: {e}")
             # 기본 데이터셋 리스트 반환
-            return ["multi-if-ko", "General_MultiIF_English", "Telco_MultiIF_Korean"]
+            return ["General_MultiIF_English", "General_MultiIF_Korean", "Telco_MultiIF_Korean"]
     
     def load_dataset(self, dataset_name: str) -> Tuple[List[str], str]:
         """데이터셋 로드"""
