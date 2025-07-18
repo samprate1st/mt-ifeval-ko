@@ -1,6 +1,7 @@
 # Multi-IFEval LangChain
 
-멀티턴 Instruction Following 평가를 위한 도구입니다. Langfuse와 LangChain을 활용하여 LLM의 멀티턴 지시 따르기 능력을 평가합니다.
+멀티턴 Instruction Following 평가를 위한 도구입니다. 
+Langfuse와 LangChain을 활용하여 LLM의 멀티턴 지시 따르기 능력을 평가합니다.
 
 ## 주요 기능
 
@@ -31,7 +32,7 @@ pip install -e .
 ```
 
 4. 환경 변수 설정
-`.env.params` 파일을 수정하여 필요한 API 키와 환경 설정을 입력하세요.
+`.env` 파일을 수정하여 필요한 API 키와 환경 설정을 입력하세요.
 
 ## 프로젝트 구조
 
@@ -64,8 +65,7 @@ mt-ifeval-ko/
 ├── scripts/                       # 실행 스크립트
 │   ├── ifeval_langchain_with_langfuse.py
 │   ├── ifeval_langgraph_with_langfuse.py
-│   ├── langfuse_dataset_upload.py
-│   └── langgraph_flow.png
+│   └── langfuse_dataset_upload.py
 └── temp/                          # 임시 파일 디렉토리
 ```
 
