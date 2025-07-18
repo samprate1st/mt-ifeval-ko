@@ -58,12 +58,15 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 
 # IFEval 관련 라이브러리
 try:
-    # 상대 경로로 ifeval 모듈 임포트
-    sys.path.append(os.path.join(WORK_DIR, "ifeval"))
-    from ifeval.evaluation_main import test_instruction_following_strict, test_instruction_following_loose
-    from ifeval.evaluation_main import InputExample, OutputExample
-except ImportError:
-    print("Warning: ifeval 모듈을 가져올 수 없습니다. 평가 기능이 제한될 수 있습니다.")
+    # 절대 경로로 ifeval 모듈 임포트
+    ifeval_path = os.path.join(WORK_DIR, "ifeval")
+    if ifeval_path not in sys.path:
+        sys.path.insert(0, ifeval_path)
+    
+    from evaluation_main import test_instruction_following_strict, test_instruction_following_loose
+    from evaluation_main import InputExample, OutputExample
+except ImportError as e:
+    print(f"Warning: ifeval 모듈을 가져올 수 없습니다. 평가 기능이 제한될 수 있습니다. 오류: {e}")
     sys.exit(1)
 
 # 평가 결과를 담는 데이터 클래스들
@@ -696,7 +699,7 @@ class LangfuseEvaluator:
                     "item_id": result.item_id,
                     "key": result.key,
                     "turn_index": result.turn_index,
-                    "input": result.input.prompt,
+                    "input": result.input.prompt if result.input is not None else None,
                     "output": result.output,
                     "trace_id": result.trace_id,
                     "error": result.error

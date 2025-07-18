@@ -1,12 +1,30 @@
+# Python 관련 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 가상 환경
+.venv/
+venv/
+ENV/
+
+# 환경 설정 파일
+.env
+.env.*
+
+# 출력 및 임시 파일
+output/
+temp/
+
+# 시스템 파일
+.DS_Store
+
+# 특정 스크립트 및 파일
 scripts/langgraph_flow.png
 scripts/visualize_langgraph.py
 
-output/
-temp/
-.env
-.env.*
-.venv/
-.DS_Store
-.git
-*.pyc
+# 기타
+uv.lock
 
