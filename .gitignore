@@ -28,3 +28,4 @@ scripts/visualize_langgraph.py
 # 기타
 uv.lock
 
+data/*_Korean*

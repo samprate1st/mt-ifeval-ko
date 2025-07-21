@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from pprint import pprint
 from dotenv import load_dotenv
 import uuid
+import time
 
 SCRIPT_DIR = os.path.abspath(os.path.dirname(__file__))
 print(f"SCRIPT_DIR: {SCRIPT_DIR}")
@@ -79,8 +80,27 @@ def load_dataset(file_path: str) -> pd.DataFrame:
     if file_path.endswith('.csv'):
         df = pd.read_csv(file_path)
     elif file_path.endswith('.jsonl'):
-        # JSONL 파일 처리
-        df = pd.read_json(file_path, lines=True)
+        # JSONL 파일 처리 - 라인별로 직접 파싱하여 더 견고하게 처리
+        try:
+            data = []
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for i, line in enumerate(f):
+                    try:
+                        if line.strip():  # 빈 줄 무시
+                            item = json.loads(line.strip())
+                            data.append(item)
+                    except json.JSONDecodeError as e:
+                        print(f"경고: {i+1}번째 줄에서 JSON 파싱 오류 발생: {e}")
+                        print(f"문제가 있는 줄: {line[:100]}...")
+                        # 오류가 있는 줄은 건너뜀
+            
+            if not data:
+                raise ValueError("파일에서 유효한 JSON 데이터를 찾을 수 없습니다.")
+            
+            df = pd.DataFrame(data)
+        except Exception as e:
+            print(f"JSONL 파일 로드 중 오류 발생: {e}")
+            raise
     else:
         raise ValueError("지원되지 않는 파일 형식입니다. CSV 또는 JSONL 파일만 지원합니다.")
     
@@ -96,6 +116,11 @@ def load_dataset(file_path: str) -> pd.DataFrame:
 def create_benchmark_dataset(langfuse_client, name: str, data: List[Dict]) -> Any:
     """평가용 데이터셋 생성 및 업로드"""
     print(f"데이터셋 '{name}' 생성 중...")
+    
+    # 오류 로그 파일 생성
+    log_dir = os.path.join(os.getcwd(), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"{name}_upload_errors_{int(time.time())}.log")
     
     # 만일 동일한 이름의 데이터셋이 이미 존재한다면 skip 하고 본 함수를 종료
     # 만일 동일한 이름의 데이터셋이 없다면, 새로운 데이터셋을 생성
@@ -119,25 +144,129 @@ def create_benchmark_dataset(langfuse_client, name: str, data: List[Dict]) -> An
     print(f"데이터셋에 {len(data)} 개의 항목 추가 중...")
     success_count = 0
     error_count = 0
+    error_items = []
     
-    for idx, item in enumerate(data, 1):
-        try:
-            langfuse_client.create_dataset_item(
-                dataset_name=name,
-                input=item.get("input", ""),
-                expected_output=item.get("output", ""),
-                metadata=item.get("metadata", ""),
-            )
-            success_count += 1
-            
-            if idx % 50 == 0:
-                print(f"진행 중: {idx}/{len(data)} 항목 처리됨")
+    with open(log_file, 'w', encoding='utf-8') as f_log:
+        f_log.write(f"=== 데이터셋 '{name}' 업로드 오류 로그 ===\n")
+        f_log.write(f"시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        for idx, item in enumerate(data, 1):
+            try:
+                # NaN 값 처리를 위한 함수
+                def sanitize_json_values(obj):
+                    from collections import OrderedDict
+                    
+                    if isinstance(obj, dict):
+                        # turn_X 키를 처리할 때 OrderedDict 사용하여 필드 순서 유지
+                        if isinstance(obj, dict) and any(key.startswith("turn_") for key in obj.keys()):
+                            result = {}
+                            for key, value in obj.items():
+                                if key.startswith("turn_"):
+                                    # turn_X 내부 필드 순서 유지
+                                    turn_data = OrderedDict()
+                                    
+                                    # 1. prompt (첫 번째)
+                                    if "prompt" in value:
+                                        turn_data["prompt"] = sanitize_json_values(value["prompt"])
+                                    
+                                    # 2. instruction_id_list (두 번째)
+                                    if "instruction_id_list" in value:
+                                        turn_data["instruction_id_list"] = sanitize_json_values(value["instruction_id_list"])
+                                    
+                                    # 3. kwargs (세 번째)
+                                    if "kwargs" in value:
+                                        turn_data["kwargs"] = sanitize_json_values(value["kwargs"])
+                                    
+                                    # 기타 필드가 있다면 마지막에 추가
+                                    for k, v in value.items():
+                                        if k not in ["prompt", "instruction_id_list", "kwargs"]:
+                                            turn_data[k] = sanitize_json_values(v)
+                                    
+                                    result[key] = dict(turn_data)
+                                else:
+                                    result[key] = sanitize_json_values(value)
+                            return result
+                        else:
+                            # 일반 dict는 그대로 처리
+                            return {k: sanitize_json_values(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [sanitize_json_values(i) for i in obj]
+                    elif pd.isna(obj):  # NaN, None 등 체크
+                        return None
+                    else:
+                        return obj
                 
-        except Exception as e:
-            error_count += 1
-            print(f"Warning: 항목 추가 중 오류 발생 (항목 {idx}): {str(e)}")
+                # 입력 데이터 정제
+                input_data = sanitize_json_values(item.get("input", ""))
+                expected_output = sanitize_json_values(item.get("output", ""))
+                metadata = sanitize_json_values(item.get("metadata", ""))
+                
+                langfuse_client.create_dataset_item(
+                    dataset_name=name,
+                    input=input_data,
+                    expected_output=expected_output,
+                    metadata=metadata,
+                )
+                success_count += 1
+                
+                if idx % 50 == 0:
+                    print(f"진행 중: {idx}/{len(data)} 항목 처리됨")
+                    
+            except Exception as e:
+                error_count += 1
+                error_msg = f"Warning: 항목 추가 중 오류 발생 (항목 {idx}): {str(e)}"
+                print(error_msg)
+                
+                # 오류 항목 정보 수집
+                key = "unknown"
+                if "metadata" in item and isinstance(item["metadata"], dict):
+                    key = item["metadata"].get("key", "unknown")
+                
+                # 오류 로그 기록
+                f_log.write(f"=== 오류 항목 #{error_count} ===\n")
+                f_log.write(f"인덱스: {idx}\n")
+                f_log.write(f"Key: {key}\n")
+                f_log.write(f"오류 메시지: {str(e)}\n")
+                
+                # 오류 항목의 내용 요약 기록
+                f_log.write("항목 내용 요약:\n")
+                if "input" in item:
+                    if isinstance(item["input"], dict):
+                        for turn_key, turn_value in item["input"].items():
+                            if isinstance(turn_value, dict) and "prompt" in turn_value:
+                                prompt_value = turn_value["prompt"]
+                                if pd.isna(prompt_value):
+                                    prompt_preview = "NaN (Not a Number)"
+                                else:
+                                    prompt_preview = str(prompt_value)[:100] + "..." if len(str(prompt_value)) > 100 else str(prompt_value)
+                                f_log.write(f"  - {turn_key} 프롬프트: {prompt_preview}\n")
+                
+                # 항목 전체 내용 기록 (JSON 형식)
+                try:
+                    sanitized_item = sanitize_json_values(item)
+                    f_log.write("항목 전체 내용 (JSON):\n")
+                    f_log.write(json.dumps(sanitized_item, ensure_ascii=False, indent=2))
+                except Exception as json_err:
+                    f_log.write(f"항목 JSON 직렬화 실패: {str(json_err)}\n")
+                
+                f_log.write("\n\n")
+                
+                # 오류 항목 목록에 추가
+                error_items.append((idx, key, str(e)))
     
     print(f"데이터셋 업로드 완료: 성공 {success_count}개, 실패 {error_count}개")
+    
+    # 오류 요약 출력
+    if error_count > 0:
+        print(f"\n오류 항목 요약 (총 {error_count}개):")
+        for idx, key, error in error_items[:10]:  # 처음 10개만 출력
+            print(f"  - 항목 #{idx}, Key: {key}, 오류: {error}")
+        
+        if error_count > 10:
+            print(f"  ... 그 외 {error_count - 10}개 항목")
+        
+        print(f"\n자세한 오류 정보는 로그 파일을 확인하세요: {log_file}")
+    
     return dataset
 
 def remove_dataset_duplicates(langfuse_client, dataset_name: str) -> Any:
@@ -222,47 +351,31 @@ def delete_benchmark_dataset(langfuse_client, dataset_name: str) -> bool:
 
 
 def refine_dataset_in_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """데이터프레임의 각 row 별 데이터 상태를 확인하고 정제하여 업데이트 하고 리턴"""
+    """데이터셋 정제 함수"""
+    
+    # NaN 값 처리
+    # NaN 값을 None으로 변환하여 JSON 직렬화 가능하게 만듦
+    df = df.replace({np.nan: None})
     
     def clean_string_with_json(value_str: str) -> str:
-        """문자열을 JSON 파싱을 통해 정제"""
-        if not isinstance(value_str, str) or not value_str.strip():
+        """JSON 문자열 정제"""
+        if value_str is None:
+            return None
+            
+        try:
+            if isinstance(value_str, str):
+                # 문자열이 JSON 형식인 경우 파싱 시도
+                json_obj = json.loads(value_str)
+                return json.dumps(json_obj, ensure_ascii=False)
+            else:
+                # 이미 객체인 경우 그대로 반환
+                return value_str
+        except json.JSONDecodeError:
+            # JSON 파싱 실패 시 원본 문자열 반환
             return value_str
-        
-        # 정제 시도 단계
-        attempts = [
-            # 1. 원본 그대로 파싱 시도
-            lambda s: s,
-            # 2. 연속된 백슬래시 줄이기 시도
-            lambda s: s.replace('\\\\', '\\'),
-            # 3. 이스케이프된 따옴표 처리 시도
-            lambda s: s.replace('\\"', '"'),
-            # 4. 백슬래시와 따옴표 모두 처리 시도
-            lambda s: s.replace('\\\\', '\\').replace('\\"', '"'),
-            # 5. 역슬래시 제거 후 시도
-            lambda s: s.replace('\\', '')
-        ]
-        
-        original_str = value_str
-        
-        for attempt_func in attempts:
-            try:
-                # 정제 함수 적용
-                cleaned_str = attempt_func(value_str)
-                
-                # JSON 파싱 시도
-                parsed = json.loads(cleaned_str)
-                
-                # 성공하면 다시 문자열로 변환하여 반환 (한글 유지)
-                return json.dumps(parsed, ensure_ascii=False)
-            except json.JSONDecodeError:
-                continue
-            except Exception:
-                continue
-        
-        # 모든 시도 실패 시 원본 반환
-        print(f"Warning: JSON 정제 실패: {original_str[:50]}...")
-        return original_str
+        except Exception as e:
+            print(f"Warning: JSON 정제 실패: {value_str[:50]}...")
+            return value_str
     
     def clean_prompt(prompt_str: str) -> str:
         """프롬프트 문자열 정제"""
@@ -325,6 +438,8 @@ def refine_dataset_in_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 def process_dataframe_to_langfuse_format(df: pd.DataFrame, language: str = "Korean") -> List[Dict]:
     """데이터프레임을 Langfuse 데이터셋 형식으로 변환"""
+    from collections import OrderedDict
+    
     data = []
     
     for _, row in df.iterrows():
@@ -341,28 +456,29 @@ def process_dataframe_to_langfuse_format(df: pd.DataFrame, language: str = "Kore
         
         max_turns = 3  # 기본값
         for turn_idx in range(1, max_turns + 1):
-        
             turn_key = f"turn_{turn_idx}"
-            turn_data = {}
             
-            # 프롬프트
+            # OrderedDict를 사용하여 필드 순서 유지
+            turn_data = OrderedDict()
+            
+            # 1. 프롬프트 (첫 번째로 추가)
             prompt_key = f"{turn_key}_prompt"
-            if "" != row[prompt_key]:
+            if prompt_key in row and row[prompt_key] != "":
                 turn_data["prompt"] = row[prompt_key]
             
+            # 2. instruction_id_list (두 번째로 추가)
             inst_key = f"{turn_key}_instruction_id_list"
-            if "" != row[inst_key]:
+            if inst_key in row and row[inst_key] != "":
                 turn_data["instruction_id_list"] = row[inst_key]
             
-            # kwargs
+            # 3. kwargs (세 번째로 추가)
             kwargs_key = f"{turn_key}_kwargs"
-            if "" != row[kwargs_key]:
+            if kwargs_key in row and row[kwargs_key] != "":
                 turn_data["kwargs"] = row[kwargs_key]
             
             # 턴 데이터가 있으면 입력에 추가
             if turn_data:
-                input_data[turn_key] = turn_data
-        
+                input_data[turn_key] = dict(turn_data)  # OrderedDict를 일반 dict로 변환
         
         # 항목 구성
         item["input"] = input_data

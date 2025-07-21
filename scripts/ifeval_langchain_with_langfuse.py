@@ -63,8 +63,8 @@ try:
     if ifeval_path not in sys.path:
         sys.path.insert(0, ifeval_path)
     
-    from evaluation_main import test_instruction_following_strict, test_instruction_following_loose
-    from evaluation_main import InputExample, OutputExample
+    from ifeval.evaluation_main import test_instruction_following_strict, test_instruction_following_loose
+    from ifeval.evaluation_main import InputExample, OutputExample
 except ImportError as e:
     print(f"Warning: ifeval 모듈을 가져올 수 없습니다. 평가 기능이 제한될 수 있습니다. 오류: {e}")
     sys.exit(1)
@@ -141,7 +141,9 @@ class LangfuseEvaluator:
         
         # 체인 생성
         self.ifgen_chain = self._create_ifgen_chain()
-    
+
+        self.system_message = SystemMessage(content="You are a helpful assistant. You need to answer the questions in 2~3 turns. You need to follow the instructions strictly, and you have to always consider the entire conversation history.")
+
     def _create_ifgen_chain(self):
         """IFGen 체인 생성"""
         template = """{prompt}"""
@@ -602,6 +604,7 @@ class LangfuseEvaluator:
             print(f"   📋 언어: {item.metadata.get('language', 'N/A')}")
         
         messages = []
+        messages.append(self.system_message)
         item_results = []
         
         # 턴 수 확인

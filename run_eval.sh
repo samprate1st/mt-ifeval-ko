@@ -26,7 +26,7 @@ RUN_NAME="${safe_model_name}-${DATASET}-$(date +%H%M%S)"
 TEMPERATURE="0.6"
 
 # 평가할 최대 아이템 수 (비워두면 전체 데이터셋 평가)
-LIMIT="10"
+LIMIT="1000"
 
 # 상세 로그 출력 여부 (true/false)
 VERBOSE="false"

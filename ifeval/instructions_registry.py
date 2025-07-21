@@ -121,6 +121,7 @@ KO_INSTRUCTION_DICT = {
     _CHANGE_CASES
     + "english_lowercase": ko_instructions.LowercaseLettersEnglishChecker,
     _PUNCTUATION + "no_comma": ko_instructions.CommaChecker,
+    _PUNCTUATION + "no_period": ko_instructions.PeriodChecker,
     _STARTEND + "quotation": ko_instructions.QuotationChecker,
     _STARTEND + "single_quote": ko_instructions.SingleQuoteChecker,
 }
