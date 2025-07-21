@@ -26,7 +26,7 @@ from typing import Dict, Optional, Sequence, Union
 
 import langdetect
 
-from ifeval.instruction_utils import ko_instructions_util
+from ifeval.instruction_utils import ko_instructions_util, en_instructions_util
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,9 @@ _NUM_PLACEHOLDERS = 4
 
 # The number of bullet lists.
 _NUM_BULLETS = 5
+
+# The number of digit lists.
+_NUM_DIGIT_LIST = 5
 
 # The options of constrained response.
 _CONSTRAINED_RESPONSE_OPTIONS = (
@@ -184,6 +187,136 @@ class ResponseLanguageChecker(Instruction):
                 "Unable to detect language for text %s due to %s", value, e
             )  # refex: disable=pytotw.037
             return True
+
+
+class FormalTextCheckerKorean(Instruction):
+    """Check the format text in Korean language"""
+
+    def build_description(self):
+        self._description_pattern = (
+            "한국어에서 종결어미가 '-니다/ -습니다'로 통일된 문장인 경우를 판단하고 true/false를 반환"
+        )
+        return self._description_pattern
+
+    def get_instruction_args(self):
+        """Returns the keyward args of `build_description`."""
+        return None
+
+    def get_instruction_args_keys(self):
+        """Returns the args keys of `build_description`."""
+        return []
+
+    def check_following(self, value):
+        """Check if the entire response in Korean language follows the instruction.
+        한국어에서 종결어미가 '-니다/ -습니다'로 통일된 문장인 경우를 판단하고 true/false를 반환
+
+        Args:
+          value: A string representing the response.
+
+        Returns:
+          True if the entire response in Korean language follows instruction; otherwise False.
+        """
+        try:
+            assert isinstance(value, str)
+        except:
+            print('Failed for assertion, got non str type input,', value)
+            return False
+
+        # 답변이 한국어가 아니라는 의미이므로 즉시 False 반환
+        if not check_korean_language_safely(value):
+            return False
+
+        value = value.strip()
+        print(f"[DEBUG] FormalTextCheckerKorean / value: {value}")
+        return check_formal_text_korean(value)
+
+def check_korean_language_safely(text):
+    try:
+        if not text or text.strip() == "":
+            return False
+        lang = langdetect.detect(text)
+        return lang == "ko"
+    except langdetect.lang_detect_exception.LangDetectException:
+        # 언어를 감지할 수 없는 경우 기본값 반환
+        return False
+
+def check_formal_text_korean(value, strict_mode=True, min_sentence_length=2):
+    """한국어 문장이 존대말/경어체로 작성되었는지 판단합니다.
+    
+    Args:
+        value (str): 판단할 한국어 문장
+        strict_mode (bool): 엄격 모드. True면 모든 문장이 경어체여야 함.
+                           False면 과반수가 경어체면 True 반환
+        min_sentence_length (int): 판단 대상 최소 문장 길이
+        
+    Returns:
+        bool: 경어체이면 True, 반말체이면 False
+    """
+    if not value or not value.strip():
+        return False
+    
+    # 텍스트 전처리
+    processed_text = ko_instructions_util.preprocess_korean_text(value)
+    
+    # 패턴 객체 생성
+    patterns = ko_instructions_util.KoreanFormalityPatterns()
+    
+    # 문장 단위로 분할
+    sentences = ko_instructions_util.split_into_sentences(processed_text)
+    
+    if not sentences:
+        return False
+    
+    formal_count = 0
+    informal_count = 0
+    
+    for sentence in sentences:
+        if len(sentence) < min_sentence_length:
+            continue
+            
+        # 경어체 패턴 확인
+        is_formal = False
+        is_informal = False
+        
+        # 1. 어말어미 패턴 확인
+        for pattern in patterns.get_all_formal_patterns():
+            if re.search(pattern, sentence):
+                is_formal = True
+                break
+        
+        # 2. 높임 어휘 확인
+        if not is_formal:
+            for honorific in patterns.honorific_words:
+                if re.search(honorific, sentence):
+                    is_formal = True
+                    break
+        
+        # 3. 반말체 패턴 확인 (경어체가 아닌 경우에만)
+        if not is_formal:
+            for pattern in patterns.get_all_informal_patterns():
+                if re.search(pattern, sentence):
+                    is_informal = True
+                    break
+        
+        # 결과 집계
+        if is_formal:
+            formal_count += 1
+        elif is_informal:
+            informal_count += 1
+        # 패턴에 매치되지 않는 경우는 중립으로 처리
+    
+    # 판단 로직
+    total_sentences = len([s for s in sentences if len(s) >= min_sentence_length])
+    
+    if total_sentences == 0:
+        return False
+    
+    if strict_mode:
+        # 엄격 모드: 반말이 하나라도 있으면 False
+        return informal_count == 0 and formal_count > 0
+    else:
+        # 관대 모드: 경어체가 과반수이면 True
+        return formal_count > informal_count
 
 
 class NumberOfSentences(Instruction):
@@ -341,6 +474,72 @@ class BulletListChecker(Instruction):
         return num_bullet_lists == self._num_bullets
 
 
+
+class DigitListChecker(Instruction):
+    """Checks the digit list in the prompt."""
+
+    def build_description(self, *, num_digit_list=None):
+        """Build the instruction description.
+
+        Args:
+          num_digit_list: An integer specifying the exact number of digit lists
+            that is required to appear in the response.
+
+        Returns:
+          A string representing the instruction description.
+        """
+        self._num_digit_list = num_digit_list
+        if self._num_digit_list is None or self._num_digit_list < 0:
+            self._num_digit_list = random.randint(1, _NUM_DIGIT_LIST)
+        self._description_pattern = (
+            "Your answer must contain exactly {num_digit_list} digit lists. "
+            + "Use the digit list such as:\n"
+            + "1. This is 1st digit point\n"
+            + "2. This is 2nd digit point\n\n"
+            + "Or use the digit list such as:\n"
+            + "1) This is 1st digit point\n"
+            + "2) This is 2nd digit point"
+        )
+        return self._description_pattern.format(num_digit_list=self._num_digit_list)
+
+    def get_instruction_args(self):
+        """Returns the keyward args of `build_description`."""
+        return {"num_digit_list": self._num_digit_list}
+
+    def get_instruction_args_keys(self):
+        """Returns the args keys of `build_description`."""
+        return ["num_digit_list"]
+
+    def check_following(self, value):
+        r"""Check if the number of digit lists meets the requirement.
+
+        Args:
+          value: A string representing the response. The response is expected to
+            contain some digit+")" or digit+"." .
+
+        Returns:
+          True if the actual number of digit lists in the response meets the
+          requirement.
+        """
+        num_digit_list = digit_list_checker_rule(value)
+
+        return num_digit_list == self._num_digit_list
+
+def digit_list_checker_rule(value):
+    # 텍스트 내용에서 여러 항목을 아래와 같이 숫자로 나열하는 경우를 검색해서 숫자 나열 항목의 갯수를 리턴하는 함수
+    # 숫자 나열 항목 예)
+    #  1) 항목1
+    #  2) 항목2
+    # 또는, 
+    #  1. 항목1
+    #  2. 항목2
+
+    digit_lists = re.findall(r"^\s*\d+\).*$", value, flags=re.MULTILINE)
+    digit_lists_2 = re.findall(r"^\s*\d+\..*$", value, flags=re.MULTILINE)
+    num_digit_list = len(digit_lists) + len(digit_lists_2)
+    
+    return num_digit_list
+
 class ConstrainedResponseChecker(Instruction):
     """Checks the constrained response."""
 
@@ -376,6 +575,57 @@ class ConstrainedResponseChecker(Instruction):
             if constrained_response in value:
                 return True
         return False
+
+
+class ConstrainedCustomResponseChecker(Instruction):
+    """Checks the constrained custom response."""
+
+    def build_description(self, choices=None):
+        """Build the instruction description."""
+        # A sequence of string(s) representing the options of the expected response.
+        # 만일 choices가 None이거나 빈 리스트이거나 리스트가 아니면 기본 제약 조건 사용
+        if choices is None or len(choices) == 0 or not isinstance(choices, list):
+            self._constrained_responses = _CONSTRAINED_RESPONSE_OPTIONS
+        else:
+            self._constrained_responses = choices
+        self._description_pattern = (
+            "Answer with one of the following options: {response_options}"
+        )
+        return self._description_pattern.format(
+            response_options=self._constrained_responses
+        )
+
+    def get_instruction_args(self):
+        """Returns the keyward args of `build_description`."""
+        return None
+
+    def get_instruction_args_keys(self):
+        """Returns the args keys of `build_description`."""
+        return [{"choices": list(self._constrained_responses)}]
+
+    def check_following(self, value):
+        """Checks if the response matches the constrained options.
+
+        Args:
+          value: A string representing the response.
+
+        Returns:
+          True if the actual response contains one of the options in the constrained
+          responses; otherwise False.
+        """
+
+        value = value.strip()
+
+        # self._constrained_responses 로 주어진 문장들 중 하나라도 존재하면, True 반환
+        for constrained_response in self._constrained_responses:
+            response_pattern = r"^\s*" + constrained_response + r".*$"
+            response_with_constrained_start = re.search(
+                response_pattern, value, flags=re.MULTILINE
+            )
+            if response_with_constrained_start:
+                return True
+        return False
+
 
 # instruction_registry에서 이용 안함
 class ConstrainedStartChecker(Instruction):
@@ -1108,6 +1358,121 @@ class ParagraphFirstWordCheck(Instruction):
         return num_paragraphs == self._num_paragraphs and first_word == self._first_word
 
 
+class ParagraphFirstSentenceCheck(Instruction):
+    """Check the paragraph and the first sentence of the nth paragraph."""
+
+    def build_description(
+        self, num_paragraphs=None, nth_paragraph=None, first_sentence=None
+    ):
+        r"""Build the instruction description.
+
+        Args:
+          num_paragraphs: An integer indicating the number of paragraphs expected
+            in the response. A paragraph is a subset of the string that is
+            expected to be separated by '\n\n'.
+          nth_paragraph: An integer indicating the paragraph number that we look at.
+            Note that n starts from 1.
+          first_sentence: A string that represent the first sentence of the bth paragraph.
+
+        Returns:
+          A string representing the instruction description.
+        """
+        self._num_paragraphs = num_paragraphs
+        if self._num_paragraphs is None or self._num_paragraphs < 0:
+            self._num_paragraphs = random.randint(1, _NUM_PARAGRAPHS)
+
+        self._nth_paragraph = nth_paragraph
+        if (
+            self._nth_paragraph is None
+            or self._nth_paragraph <= 0
+            or self._nth_paragraph > self._num_paragraphs
+        ):
+            self._nth_paragraph = random.randint(1, self._num_paragraphs + 1)
+
+        self._first_sentence = first_sentence
+        if self._first_sentence is None:
+            raise ValueError("Class ParagraphFirstSentenceCheck requires first_sentence")
+            # self._first_sentence = ko_instructions_util.generate_keywords(num_keywords=1)[0]
+        self._first_sentence = self._first_sentence.lower()
+
+
+        self._description_pattern = (
+            "There should be {num_paragraphs} paragraphs. "
+            + "Paragraphs and only paragraphs are separated with each other by two "
+            + "new lines as if it was '\\n\\n' in python. "
+            + "Paragraph {nth_paragraph} must start with sentence {first_sentence}."
+        )
+
+        return self._description_pattern.format(
+            num_paragraphs=self._num_paragraphs,
+            nth_paragraph=self._nth_paragraph,
+            first_sentence=self._first_sentence,
+        )
+
+    def get_instruction_args(self):
+        """Returns the keyward args of `build_description`."""
+        return {
+            "num_paragraphs": self._num_paragraphs,
+            "nth_paragraph": self._nth_paragraph,
+            "first_sentence": self._first_sentence,
+        }
+
+    def get_instruction_args_keys(self):
+        """Returns the args keys of `build_description`."""
+        return ["num_paragraphs", "nth_paragraph", "first_sentence"]
+
+    def check_following(self, value):
+        """Checks for required number of paragraphs and correct first word.
+
+        Args:
+          value: a string representing the response. The response may contain
+            paragraphs that are separated by two new lines and the first word of
+            the nth paragraph will have to match a specified word.
+
+        Returns:
+          True if the number of paragraphs is the same as required and the first
+          word of the specified paragraph is the same as required. Otherwise, false.
+        """
+        try:
+            lang = langdetect.detect(value)
+        except:
+            print("Failed to detect language, got value:", value)
+            lang = 'en'
+
+        # split_paragraphs_llm() 함수를 사용하여 문단 분리
+        paragraphs = re.split(r"\n\n", value)
+        num_paragraphs = len(paragraphs)
+
+        for paragraph in paragraphs:
+            if not paragraph.strip():
+                num_paragraphs -= 1
+
+        # check that index doesn't go out of bounds
+        if self._nth_paragraph <= num_paragraphs:
+            paragraph = paragraphs[self._nth_paragraph - 1].strip()
+            if not paragraph:
+                return False
+        else:
+            return False
+
+        # get first sentence and remove punctuation
+        if lang == 'ko':
+            sentences = ko_instructions_util.split_into_sentences(paragraph)
+        else:
+            sentences = en_instructions_util.split_into_sentences(paragraph)
+
+        sentence = sentences[0].strip()
+        sentence = sentence.lstrip("'")
+        sentence = sentence.lstrip('"')
+
+        # 문장 맨 뒤의 문장부호는 제거
+        first_sentence = sentence.lower() 
+        first_sentence = first_sentence.rstrip(".").rstrip(",").rstrip("?").rstrip("!").rstrip("'").rstrip('"')
+        self._first_sentence = self._first_sentence.lower().lstrip("'").lstrip('"')
+        self._first_sentence = self._first_sentence.rstrip(".").rstrip(",").rstrip("?").rstrip("!").rstrip("'").rstrip('"')
+
+        return num_paragraphs == self._num_paragraphs and first_sentence == self._first_sentence
+
 # TODO(jeffrey) add relation - at least/at most?
 class KeySentenceChecker(Instruction):
     """Check the existence of certain key sentences."""
@@ -1158,9 +1523,9 @@ class KeySentenceChecker(Instruction):
     def check_following(self, value):
         """Checks if the response contains the expected key sentences."""
         count = 0
-        sentences = ko_instructions_util.split_into_sentences(value)
-        for sentence in self._key_sentences:
-            if sentence in sentences:
+        all_sentences = ko_instructions_util.split_into_sentences(value)
+        for key_sentence in self._key_sentences:
+            if key_sentence in all_sentences:
                 count += 1
 
         return count == self._num_sentences
@@ -1342,6 +1707,121 @@ class RepeatPromptThenAnswer(Instruction):
             return True
         return False
 
+
+class RephrasingPromptThenAnswer(Instruction):
+    """Checks that Prompt is first rephrased then answered."""
+
+    def build_description(self, *, prompt_to_rephrase=None):
+        """Build the instruction description.
+
+        Args:
+          prompt_to_rephrase: The prompt that is meant to be rephrased.
+
+        Returns:
+          A string representing the instruction description.
+        """
+        if not prompt_to_rephrase:
+            raise ValueError("prompt_to_rephrase must be set.")
+        else:
+            self._prompt_to_rephrase = prompt_to_rephrase
+        self._description_pattern = (
+            "First rephrase the request word for word without change,"
+            " then give your answer (1. do not say any words or characters"
+            " before rephrasing the request; 2. the request you need to rephrase"
+            " does not include this sentence)"
+        )
+        return self._description_pattern
+
+    def get_instruction_args(self):
+        return {"prompt_to_rephrase": self._prompt_to_rephrase}
+
+    def get_instruction_args_keys(self):
+        """Returns the args keys of `build_description`."""
+        return ["prompt_to_rephrase"]
+
+    def check_following(self, value):
+
+        if len(value.strip()) == 0:
+            return False
+        
+        first_sentence = value.split("\n")[0].lower()
+
+        answer = check_rephrase(first_sentence, self._prompt_to_rephrase)
+        return answer
+
+
+def check_rephrase(first_sentence, prompt_to_rephrase, similarity_threshold=0.4, debug=False):
+    """
+    첫 번째 문장이 고객 요청을 확인하는 메시지인지 판단
+    
+    Args:
+        first_sentence (str): 분석할 첫 번째 문장 (LLM 응답의 첫 문장)
+        prompt_to_rephrase (str): 원본 고객 요청
+        similarity_threshold (float): 의미적 유사도 임계값
+        debug (bool): 디버그 정보 출력 여부
+    
+    Returns:
+        bool: 고객 요청을 확인하는 메시지이면 True, 아니면 False
+    """
+    
+    if not first_sentence or not prompt_to_rephrase:
+        return False
+    
+    # 텍스트 정규화
+    normalized_sentence = ko_instructions_util.normalize_text(first_sentence)
+    normalized_prompt = ko_instructions_util.normalize_text(prompt_to_rephrase)
+    
+    patterns = ko_instructions_util.RephrasePatterns()
+    
+    debug_info = {
+        'original_sentence': first_sentence,
+        'normalized_sentence': normalized_sentence,
+        'original_prompt': prompt_to_rephrase,
+        'normalized_prompt': normalized_prompt,
+        'pattern_matches': [],
+        'negative_matches': [],
+        'semantic_similarity': 0.0,
+        'final_decision': False
+    }
+    
+    # 1. 부정적 패턴 확인 (확인이 아닌 경우)
+    for pattern in patterns.negative_patterns:
+        if re.search(pattern, normalized_sentence):
+            debug_info['negative_matches'].append(pattern)
+            if debug:
+                print(f"[DEBUG] Negative pattern matched: {pattern}")
+            debug_info['final_decision'] = False
+            if debug:
+                print(f"[DEBUG] Final result: {debug_info}")
+            return False
+    
+    # 2. 확인 패턴 매칭 확인
+    positive_pattern_found = False
+    for pattern in patterns.get_all_positive_patterns():
+        if re.search(pattern, normalized_sentence):
+            debug_info['pattern_matches'].append(pattern)
+            positive_pattern_found = True
+            if debug:
+                print(f"[DEBUG] Positive pattern matched: {pattern}")
+    
+    # 3. 의미적 유사도 계산
+    similarity = ko_instructions_util.calculate_semantic_similarity(normalized_sentence, normalized_prompt)
+    debug_info['semantic_similarity'] = similarity
+    
+    if debug:
+        print(f"[DEBUG] Semantic similarity: {similarity}")
+    
+    # 4. 최종 판단
+    # 확인 패턴이 있고, 의미적 유사도가 임계값 이상이면 True
+    final_decision = positive_pattern_found and similarity >= similarity_threshold
+    debug_info['final_decision'] = final_decision
+    
+    if debug:
+        print(f"[DEBUG] Pattern found: {positive_pattern_found}, Similarity: {similarity} >= {similarity_threshold}")
+        print(f"[DEBUG] Final result: {final_decision}")
+        print(f"[DEBUG] Debug info: {debug_info}")
+    
+    return final_decision
 
 class EndChecker(Instruction):
     """Checks that the prompt ends with a given phrase."""

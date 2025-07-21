@@ -194,7 +194,7 @@ class LangfuseEvaluator:
             **kwargs
         )
     
-    def gen_response_with_max_retry(self, messages: list[BaseMessage], max_retry: int = 3) -> BaseMessage:
+    def gen_response_with_max_retry(self, messages: list[BaseMessage], max_retry: int = 5) -> BaseMessage:
         """최대 재시도 횟수로 응답 생성"""
         if len(messages) == 0:
             raise ValueError("messages is empty")
@@ -752,7 +752,7 @@ def main():
     parser = argparse.ArgumentParser(description="Langfuse와 LangChain을 활용한 멀티턴 Instruction Following 평가")
     parser.add_argument("--dataset", "-d", type=str, required=True, help="평가할 Langfuse 데이터셋 이름")
     parser.add_argument("--run-name", "-r", type=str, default=f"ifeval_{int(time.time())}", help="평가 실행 이름")
-    parser.add_argument("--model", "-m", type=str, help="사용할 LLM 모델 이름")
+    parser.add_argument("--model", "-m", type=str, default=None, help="사용할 LLM 모델 이름")
     parser.add_argument("--temperature", "-t", type=float, default=0.6, help="생성 온도")
     parser.add_argument("--limit", "-l", type=int, help="평가할 최대 아이템 수")
     parser.add_argument("--verbose", "-v", action="store_true", help="상세 로그 출력")
@@ -761,7 +761,8 @@ def main():
     parser.add_argument("--workers", "-w", type=int, default=4, help="병렬 처리 작업자 수")
     
     args = parser.parse_args()
-    
+    print(f"args: {args}")
+
     # 평가기 초기화
     evaluator = LangfuseEvaluator(
         model_name=args.model,
