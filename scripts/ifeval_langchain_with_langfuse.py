@@ -141,22 +141,12 @@ class LangfuseEvaluator:
         
         # 체인 생성
         self.ifgen_chain = self._create_ifgen_chain()
-
-        self.system_message = SystemMessage(content="You are a helpful assistant. You need to answer the questions in 2~3 turns. You need to follow the instructions strictly, and you have to always consider the entire conversation history.")
+        self.system_message = SystemMessage(content="You are a helpful assistant. You need to answer the questions in 2~3 turns, and when you answer the question, you HAVE TO always consider the entire conversation history. You also need to follow the instructions strictly.")
 
     def _create_ifgen_chain(self):
-        """IFGen 체인 생성"""
-        template = """{prompt}"""
-        prompt = ChatPromptTemplate.from_template(template)
-
-        ifgen_chain = (
-            {"prompt": RunnableLambda(self._check_prompt)} 
-            | prompt
-            | self.llm
-            | StrOutputParser()
-        )
-
-        return ifgen_chain
+        """개선된 IFGen 체인 생성 - LLM만 사용"""
+        # LLM이 BaseMessage 리스트를 직접 처리하고 AIMessage를 반환
+        return self.llm
     
     def _check_prompt(self, prompt):
         """프롬프트 처리 함수"""
@@ -180,35 +170,64 @@ class LangfuseEvaluator:
                 return prompt.get("content", prompt)
             return prompt
     
-    def invoke_with_tracing(self, prompt: str, **kwargs):
+    def invoke_with_tracing(self, messages: List[BaseMessage], **kwargs):
         """추적이 포함된 체인 실행"""
-        return self.ifgen_chain.invoke(
-            prompt, 
-            config={
-                "callbacks": [self.langfuse_handler],
-                "metadata": {
-                    "langfuse_tags": ["evaluation", "ifeval"],
-                    "evaluation_run": True
-                },
+        config = {
+            "callbacks": [self.langfuse_handler] if self.langfuse_handler else [],
+            "metadata": {
+                "langfuse_tags": ["evaluation", "ifeval"],
+                "evaluation_run": True
             },
+        }
+        
+        return self.ifgen_chain.invoke(
+            messages, 
+            config=config,
             **kwargs
         )
     
-    def gen_response_with_max_retry(self, messages: list[BaseMessage], max_retry: int = 5) -> BaseMessage:
-        """최대 재시도 횟수로 응답 생성"""
-        if len(messages) == 0:
-            raise ValueError("messages is empty")
+    def gen_response_with_max_retry(
+        self, 
+        messages: List[BaseMessage], 
+        max_retry: int = 5,
+        retry_delay: float = 1.0
+    ) -> AIMessage:
+        """
+        최대 재시도 횟수로 응답 생성
         
-        for attempt in range(max_retry, 0, -1):
+        Args:
+            messages: 대화 히스토리를 포함한 BaseMessage 리스트
+            max_retry: 최대 재시도 횟수
+            retry_delay: 재시도 간 대기 시간(초)
+            
+        Returns:
+            AIMessage: AI 응답 메시지
+        """
+        if not messages:
+            raise ValueError("Messages list cannot be empty")
+        
+        last_exception = None
+        
+        for attempt in range(max_retry):
             try:
-                # 메시지 체인 실행
-                prompt = messages[-1].content if messages else ""
-                ai_content = self.invoke_with_tracing(prompt)
-                return AIMessage(content=ai_content)
+                # 전체 메시지 리스트를 LLM에 직접 전달하고 AIMessage 반환받음
+                ai_message = self.invoke_with_tracing(messages)
+                return ai_message
+                
             except Exception as e:
-                print(f"   ❌ 실패: {str(e)}")
-                time.sleep(1)
-        return AIMessage(content=f'[MAX_RETRY={max_retry}] Failed.')
+                last_exception = e
+                remaining_attempts = max_retry - attempt - 1
+                print(f"   ❌ 시도 {attempt + 1}/{max_retry} 실패: {str(e)}")
+                
+                if remaining_attempts > 0:
+                    print(f"   ⏳ {retry_delay}초 후 재시도...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"   💀 모든 재시도 실패")
+        
+        # 모든 재시도 실패 시 상세한 오류 정보 포함
+        error_msg = f"[MAX_RETRY={max_retry}] 모든 시도 실패. 마지막 오류: {str(last_exception)}"
+        return AIMessage(content=error_msg)
     
     def get_dataset(self, dataset_name: str):
         """Langfuse에서 데이터셋 가져오기"""
