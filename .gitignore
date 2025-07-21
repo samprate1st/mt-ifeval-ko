@@ -17,6 +17,8 @@ ENV/
 # 출력 및 임시 파일
 output/
 temp/
+logs/
+log/
 
 # 시스템 파일
 .DS_Store
@@ -25,7 +27,10 @@ temp/
 scripts/langgraph_flow.png
 scripts/visualize_langgraph.py
 
+data/multiIF_20241018_English_messages.jsonl
+
 # 기타
 uv.lock
+instructions.txt
 
 data/*_Korean*
