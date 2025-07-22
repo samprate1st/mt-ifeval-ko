@@ -35,6 +35,20 @@ load_dotenv(ENV_FILE)
 # Add project root directory to Python path
 sys.path.append(WORK_DIR)
 
+MODEL_LIST_DICT = {
+    "amazon/anthropic/claude-sonnet-4-20250514" : "claude-sonnet-4",
+    "amazon/anthropic/claude-3-5-haiku-20241022" : "claude-3-5-hiku",
+    "gcp/gemini-2.5-flash" : "gemini-2.5-flash",
+    "gcp/gemini-2.5-pro" : "gemini-2.5-pro",
+    "openai/gpt-4.1-2025-04-14" : "gpt-4.1",
+    "openai/gpt-4o-2024-11-20" : "gpt-4o",
+    "openai/o3-2025-04-16" : "o3",
+    "skt/deepseek-r1-q4" : "deepseek-r1",
+    "skt/llama3.3-70b-it" : "llama3.3-70b-it"
+}
+
+MODEL_LIST = list(MODEL_LIST_DICT.keys())
+
 # Langfuse related libraries
 try:
     from langfuse import get_client, Langfuse
@@ -48,6 +62,11 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+
+# IFGen related libraries
+import ifeval
+import ifeval.instructions_registry
+import ifeval.evaluation_main
 
 # Define required data classes directly (instead of importing from evaluation_main.py)
 @dataclass
@@ -90,16 +109,10 @@ class GradioEvaluationApp:
         self.current_messages = []
         self.current_scores = []
         self.current_message_logs = []  # Store detailed message logs for each turn
-        self.current_model = "gpt-4o-mini"
+        self.current_model = "openai/gpt-4o-2024-11-20"
         
         # List of available models
-        self.available_models = [
-            "gpt-4o",
-            "gpt-4o-mini", 
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "gpt-4.1-nano"
-        ]
+        self.available_models = MODEL_LIST
         
         # Initialize Langfuse client
         self._initialize_langfuse()
@@ -228,6 +241,71 @@ class GradioEvaluationApp:
         except Exception as e:
             return f"❌ Item selection failed: {e}", "", "", "", "", "", "", "", "", ""
     
+    def check_dataset_modification(self, turn1_prompt: str, turn1_instruction_ids: str, turn1_kwargs: str,
+                                   turn2_prompt: str, turn2_instruction_ids: str, turn2_kwargs: str,
+                                   turn3_prompt: str, turn3_instruction_ids: str, turn3_kwargs: str,
+                                   metadata_text: str) -> str:
+        """Check dataset modification"""
+        if not self.current_item:
+            return "❌ No item selected. Please select an item first."
+        
+        try:
+            # Parse metadata
+            metadata_data = json.loads(metadata_text) if metadata_text.strip() else {}
+            
+            language = metadata_data.get("language", "Unknown").lower()
+            if language == "Unknown":
+                return "❌ Language is unknown. Please check your input."
+            language_prefix = f"{language[:2]}"
+
+            # Parse JSON strings for instruction_id_list and kwargs
+            try:
+                turn1_instruction_list = json.loads(turn1_instruction_ids) if turn1_instruction_ids.strip() else []
+                turn1_kwargs_list = json.loads(turn1_kwargs) if turn1_kwargs.strip() else []
+                turn2_instruction_list = json.loads(turn2_instruction_ids) if turn2_instruction_ids.strip() else []
+                turn2_kwargs_list = json.loads(turn2_kwargs) if turn2_kwargs.strip() else []
+                turn3_instruction_list = json.loads(turn3_instruction_ids) if turn3_instruction_ids.strip() else []
+                turn3_kwargs_list = json.loads(turn3_kwargs) if turn3_kwargs.strip() else []
+            except json.JSONDecodeError as e:
+                return f"❌ JSON parsing error: {e}. Please check your JSON format."
+
+            # check turn1 instruction_id_list and kwargs
+            for i, instruction_id in enumerate(turn1_instruction_list):
+                if not (instruction_id.startswith(language_prefix)):
+                    instruction_id = f"{language_prefix}:{instruction_id}"
+                if not ifeval.instructions_registry.INSTRUCTION_DICT.get(instruction_id):
+                    return f"❌ Invalid instruction ID: {instruction_id}. Please check your input."
+                if i < len(turn1_kwargs_list):
+                    check_result, error_message = ifeval.evaluation_main.check_instruction_kwargs_format(instruction_id, turn1_kwargs_list[i])
+                    if not check_result:
+                        return f"❌ Turn 1 - {error_message}. Please check your input."
+
+            # check turn2 instruction_id_list and kwargs
+            for i, instruction_id in enumerate(turn2_instruction_list):
+                if not (instruction_id.startswith(language_prefix)):
+                    instruction_id = f"{language_prefix}:{instruction_id}"
+                if not ifeval.instructions_registry.INSTRUCTION_DICT.get(instruction_id):
+                    return f"❌ Invalid instruction ID: {instruction_id}. Please check your input."
+                if i < len(turn2_kwargs_list):
+                    check_result, error_message = ifeval.evaluation_main.check_instruction_kwargs_format(instruction_id, turn2_kwargs_list[i])
+                    if not check_result:
+                        return f"❌ Turn 2 - {error_message}. Please check your input."
+
+            # check turn3 instruction_id_list and kwargs
+            for i, instruction_id in enumerate(turn3_instruction_list):
+                if not (instruction_id.startswith(language_prefix)):
+                    instruction_id = f"{language_prefix}:{instruction_id}"
+                if not ifeval.instructions_registry.INSTRUCTION_DICT.get(instruction_id):
+                    return f"❌ Invalid instruction ID: {instruction_id}. Please check your input."
+                if i < len(turn3_kwargs_list):
+                    check_result, error_message = ifeval.evaluation_main.check_instruction_kwargs_format(instruction_id, turn3_kwargs_list[i])
+                    if not check_result:
+                        return f"❌ Turn 3 - {error_message}. Please check your input."
+
+            return "✅ Dataset modification check completed successfully."
+        except Exception as e:
+            return f"❌ Dataset modification check failed: {e}"
+
     def update_dataset_modification(self, 
                                     turn1_prompt: str, turn1_instruction_ids: str, turn1_kwargs: str,
                                     turn2_prompt: str, turn2_instruction_ids: str, turn2_kwargs: str,
@@ -734,8 +812,18 @@ def create_gradio_app() -> gr.Blocks:
                         placeholder="Select an item to edit metadata..."
                     )
                 
-                # Update dataset modification button and status (horizontal layout)
+                # Check dataset modification button and status (horizontal layout)
                 with gr.Row():
+                    check_button = gr.Button("🔍 Check Dataset Modification", variant="secondary", scale=2)
+                    check_status = gr.Textbox(
+                        label="Check Status",
+                        value="",
+                        interactive=False,
+                        scale=3
+                    )
+
+                # Update dataset modification button and status (horizontal layout)    
+                with gr.Row():    
                     update_button = gr.Button("💾 Update Dataset Modification", variant="secondary", scale=2)
                     update_status = gr.Textbox(
                         label="Update Status",
@@ -810,6 +898,16 @@ def create_gradio_app() -> gr.Blocks:
             status = app.update_server_dataset()
             return status
         
+        def on_check_dataset(turn1_prompt, turn1_instruction_ids, turn1_kwargs,
+                            turn2_prompt, turn2_instruction_ids, turn2_kwargs,
+                            turn3_prompt, turn3_instruction_ids, turn3_kwargs,
+                            metadata_text):
+            status = app.check_dataset_modification(turn1_prompt, turn1_instruction_ids, turn1_kwargs,
+                                                  turn2_prompt, turn2_instruction_ids, turn2_kwargs,
+                                                  turn3_prompt, turn3_instruction_ids, turn3_kwargs,
+                                                  metadata_text)
+            return status
+        
         def on_run_evaluation(progress=gr.Progress()):
             chat_history, scores, logs = app.run_evaluation(progress)
             return chat_history, scores, logs
@@ -843,6 +941,15 @@ def create_gradio_app() -> gr.Blocks:
                    turn3_prompt, turn3_instruction_ids, turn3_kwargs,
                    metadata_textbox],
             outputs=[update_status]
+        )
+        
+        check_button.click(
+            on_check_dataset,
+            inputs=[turn1_prompt, turn1_instruction_ids, turn1_kwargs,
+                   turn2_prompt, turn2_instruction_ids, turn2_kwargs,
+                   turn3_prompt, turn3_instruction_ids, turn3_kwargs,
+                   metadata_textbox],
+            outputs=[check_status]
         )
         
         server_update_button.click(

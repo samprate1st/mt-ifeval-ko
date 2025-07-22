@@ -20,6 +20,7 @@ import dataclasses
 import json
 import os
 from typing import Dict, Optional, Sequence, Union
+import inspect
 
 from absl import app
 from absl import flags
@@ -109,6 +110,16 @@ def write_outputs(output_jsonl_filename, outputs):
       f.write("\n")
 
 
+def check_instruction_kwargs_format(instruction_id, kwargs):
+  """Check if the kwargs format is correct for the instruction."""
+  instruction_cls = ifeval.instructions_registry.INSTRUCTION_DICT[instruction_id]
+  build_description_params = inspect.signature(instruction_cls.build_description).parameters
+  for param_name, param_value in kwargs.items():
+    if param_name not in build_description_params:
+      return False, f"Invalid parameter: {param_name}"
+  return True, None
+
+
 def test_instruction_following_strict(
     inp,
     prompt_to_response,
@@ -160,7 +171,6 @@ def test_instruction_following_strict(
       original_kwargs = inp.kwargs[index]
       
       # instruction.build_description의 필요 매개변수 정보 가져오기
-      import inspect
       build_description_params = inspect.signature(instruction.build_description).parameters
       
       # 호환되는 매개변수만 추출
